@@ -105,6 +105,12 @@ pub async fn sys_clone(
             Arc::new(SpinLock::new(current_task.cwd.lock_save_irq().clone()))
         };
 
+        let root = if flags.contains(CloneFlags::CLONE_FS) {
+            current_task.root.clone()
+        } else {
+            Arc::new(SpinLock::new(current_task.root.lock_save_irq().clone()))
+        };
+
         let creds = current_task.creds.lock_save_irq().clone();
 
         let mut user_ctx = *current_task.ctx.lock_save_irq().user();
@@ -119,6 +125,7 @@ pub async fn sys_clone(
             vm,
             fd_table: files,
             cwd,
+            root,
             creds: SpinLock::new(creds),
             ctx: SpinLock::new(Context::from_user_ctx(user_ctx)),
             priority: current_task.priority,

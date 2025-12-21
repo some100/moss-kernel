@@ -107,7 +107,7 @@ async fn launch_init(opts: KOptions) {
     // Process all automounts.
     for (path, fs) in opts.automounts.iter() {
         let mount_point = VFS
-            .resolve_path(path, VFS.root_inode())
+            .resolve_path_absolute(path, VFS.root_inode())
             .await
             .unwrap_or_else(|e| panic!("Could not find automount path: {}. {e}", path.as_str()));
 
@@ -117,7 +117,7 @@ async fn launch_init(opts: KOptions) {
     }
 
     let inode = VFS
-        .resolve_path(&init, VFS.root_inode())
+        .resolve_path_absolute(&init, VFS.root_inode())
         .await
         .expect("Unable to find init");
 
@@ -127,8 +127,9 @@ async fn launch_init(opts: KOptions) {
     assert!(task.process.tgid.is_init());
 
     // Now that the root fs has been mounted, set the real root inode as the
-    // cwd.
+    // cwd and root.
     *task.cwd.lock_save_irq() = (VFS.root_inode(), PathBuf::new());
+    *task.root.lock_save_irq() = (VFS.root_inode(), PathBuf::new());
 
     let console = VFS
         .open(
@@ -136,6 +137,7 @@ async fn launch_init(opts: KOptions) {
             OpenFlags::O_RDWR,
             VFS.root_inode(),
             FilePermissions::empty(),
+            task.clone(),
         )
         .await
         .expect("Could not open console for init process");

@@ -14,10 +14,11 @@ pub async fn sys_faccessat(dirfd: Fd, path: TUA<c_char>, mode: i32) -> Result<us
 pub async fn sys_faccessat2(dirfd: Fd, path: TUA<c_char>, mode: i32, flags: i32) -> Result<usize> {
     let mut buf = [0; 1024];
 
+    let task = current_task();
     let access_mode = AccessMode::from_bits_retain(mode);
     let path = Path::new(UserCStr::from_ptr(path).copy_from_user(&mut buf).await?);
     let start_node = resolve_at_start_node(dirfd, path).await?;
-    let node = VFS.resolve_path(path, start_node).await?;
+    let node = VFS.resolve_path(path, start_node, task.clone()).await?;
     let at_flags = AtFlags::from_bits_retain(flags);
 
     // If mode is F_OK (value 0), the check is for the file's existence.
@@ -26,7 +27,6 @@ pub async fn sys_faccessat2(dirfd: Fd, path: TUA<c_char>, mode: i32, flags: i32)
         return Ok(0);
     }
 
-    let task = current_task();
     let attrs = node.getattr().await?;
     let creds = task.creds.lock_save_irq();
 

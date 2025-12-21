@@ -34,9 +34,24 @@ pub async fn sys_chdir(path: TUA<c_char>) -> Result<usize> {
     let current_path = task.cwd.lock_save_irq().0.clone();
     let new_path = task.cwd.lock_save_irq().1.join(path);
 
-    let node = VFS.resolve_path(path, current_path).await?;
+    let node = VFS.resolve_path(path, current_path, task.clone()).await?;
 
     *task.cwd.lock_save_irq() = (node, new_path);
+
+    Ok(0)
+}
+
+pub async fn sys_chroot(path: TUA<c_char>) -> Result<usize> {
+    let mut buf = [0; 1024];
+
+    let path = Path::new(UserCStr::from_ptr(path).copy_from_user(&mut buf).await?);
+    let task = current_task();
+    let current_path = task.root.lock_save_irq().0.clone();
+    let new_path = task.root.lock_save_irq().1.join(path);
+
+    let node = VFS.resolve_path(path, current_path, task.clone()).await?;
+
+    *task.root.lock_save_irq() = (node, new_path);
 
     Ok(0)
 }

@@ -270,8 +270,11 @@ pub async fn sys_execve(
         usr_env = usr_env.add_objs(1);
     }
 
+    let task = current_task();
     let path = Path::new(UserCStr::from_ptr(path).copy_from_user(&mut buf).await?);
-    let inode = VFS.resolve_path(path, VFS.root_inode()).await?;
+    let inode = VFS
+        .resolve_path(path, VFS.root_inode(), task.clone())
+        .await?;
 
     kernel_exec(inode, argv, envp).await?;
 

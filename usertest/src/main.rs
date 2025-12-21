@@ -54,6 +54,24 @@ fn test_chdir() {
     println!(" OK");
 }
 
+fn test_chroot() {
+    print!("Testing chroot syscall ...");
+    let file = "/bin/busybox";
+    let c_file = std::ffi::CString::new(file).unwrap();
+    let path = std::ffi::CString::new("/dev").unwrap();
+    unsafe {
+        if libc::chroot(path.as_ptr()) != 0 {
+            panic!("chroot failed");
+        } else {
+            let fd = libc::open(c_file.as_ptr(), libc::O_RDONLY);
+            if fd != -1 {
+                panic!("chroot failed");
+            }
+        }
+    }
+    println!(" OK");
+}
+
 fn test_fork() {
     print!("Testing fork syscall ...");
     unsafe {
@@ -173,6 +191,7 @@ fn main() {
     run_test(test_opendir);
     run_test(test_readdir);
     run_test(test_chdir);
+    run_test(test_chroot);
     run_test(test_fork);
     run_test(test_read);
     run_test(test_write);

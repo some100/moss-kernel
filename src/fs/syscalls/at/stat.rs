@@ -1,4 +1,5 @@
 use crate::{
+    current_task,
     fs::{VFS, syscalls::at::resolve_at_start_node},
     memory::uaccess::{UserCopyable, copy_to_user, cstr::UserCStr},
     process::fd_table::Fd,
@@ -84,11 +85,12 @@ pub async fn sys_newfstatat(
 ) -> Result<usize> {
     let mut buf = [0; 1024];
 
+    let task = current_task();
     let _flags = AtFlags::from_bits_truncate(flags);
     let path = Path::new(UserCStr::from_ptr(path).copy_from_user(&mut buf).await?);
 
     let start_node = resolve_at_start_node(dirfd, path).await?;
-    let node = VFS.resolve_path(path, start_node).await?;
+    let node = VFS.resolve_path(path, start_node, task.clone()).await?;
 
     let attr = node.getattr().await?;
 

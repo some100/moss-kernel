@@ -1,3 +1,4 @@
+use crate::current_task;
 use crate::fs::VFS;
 use crate::fs::syscalls::at::resolve_at_start_node;
 use crate::memory::uaccess::cstr::UserCStr;
@@ -14,10 +15,11 @@ pub async fn sys_mkdirat(
 ) -> libkernel::error::Result<usize> {
     let mut buf = [0; 1024];
 
+    let task = current_task();
     let path = Path::new(UserCStr::from_ptr(path).copy_from_user(&mut buf).await?);
     let start_node = resolve_at_start_node(dirfd, path).await?;
     let mode = FilePermissions::from_bits_retain(mode);
 
-    VFS.mkdir(path, start_node, mode).await?;
+    VFS.mkdir(path, start_node, mode, task.clone()).await?;
     Ok(0)
 }

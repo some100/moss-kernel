@@ -11,6 +11,7 @@ use open_file::OpenFile;
 use reg::RegFile;
 
 use crate::drivers::{DM, Driver};
+use crate::process::Task;
 use crate::sync::SpinLock;
 use alloc::vec::Vec;
 
@@ -169,7 +170,52 @@ impl VFS {
 
     /// Resolves a path string to an Inode, starting from a given root for
     /// relative paths.
-    pub async fn resolve_path(&self, path: &Path, root: Arc<dyn Inode>) -> Result<Arc<dyn Inode>> {
+    pub async fn resolve_path(
+        &self,
+        path: &Path,
+        root: Arc<dyn Inode>,
+        task: Arc<Task>,
+    ) -> Result<Arc<dyn Inode>> {
+        let mut current_inode = if path.is_absolute() {
+            task.root.lock_save_irq().0.clone() // use the task's root inode, in case a custom chroot was set
+        } else {
+            root
+        };
+
+        for component in path.components() {
+            // Before looking up the component, check if the current inode is a
+            // mount point. If so, traverse into the mounted filesystem's root.
+            if let Some(mount_root) = self
+                .state
+                .lock_save_irq()
+                .get_mount_root(&current_inode.id())
+            {
+                current_inode = mount_root;
+            }
+
+            // Delegate the lookup to the underlying filesystem.
+            current_inode = current_inode.lookup(component).await?;
+        }
+
+        // After the final lookup, check if the destination is itself a mount point.
+        if let Some(mount_root) = self
+            .state
+            .lock_save_irq()
+            .get_mount_root(&current_inode.id())
+        {
+            current_inode = mount_root;
+        }
+
+        Ok(current_inode)
+    }
+
+    /// Resolves a path string to an Inode, starting from a given root for
+    /// relative paths, and using the filesystem root inode for absolute paths.
+    pub async fn resolve_path_absolute(
+        &self,
+        path: &Path,
+        root: Arc<dyn Inode>,
+    ) -> Result<Arc<dyn Inode>> {
         let mut current_inode = if path.is_absolute() {
             self.root_inode
                 .lock_save_irq()
@@ -218,9 +264,10 @@ impl VFS {
         flags: OpenFlags,
         root: Arc<dyn Inode>,
         mode: FilePermissions,
+        task: Arc<Task>,
     ) -> Result<Arc<OpenFile>> {
         // Attempt to resolve the full path first.
-        let resolve_result = self.resolve_path(path, root.clone()).await;
+        let resolve_result = self.resolve_path(path, root.clone(), task.clone()).await;
 
         let target_inode = match resolve_result {
             // The file/directory exists.
@@ -243,7 +290,7 @@ impl VFS {
                     // (cwd or dirfd) as the parent directory.
                     let file_name = path.file_name().ok_or(FsError::InvalidInput)?;
                     let parent_inode = if let Some(parent_path) = path.parent() {
-                        self.resolve_path(parent_path, root.clone()).await?
+                        self.resolve_path(parent_path, root.clone(), task).await?
                     } else {
                         root.clone()
                     };
@@ -324,9 +371,10 @@ impl VFS {
         path: &Path,
         root: Arc<dyn Inode>,
         mode: FilePermissions,
+        task: Arc<Task>,
     ) -> Result<()> {
         // Try to resolve the target directory first.
-        match self.resolve_path(path, root.clone()).await {
+        match self.resolve_path(path, root.clone(), task.clone()).await {
             // The path already exists, this is an error.
             Ok(_) => Err(FsError::AlreadyExists.into()),
 
@@ -339,7 +387,7 @@ impl VFS {
                 // component (e.g., \"foo\"), treat the provided `root`
                 // directory (AT_FDCWD / cwd / dirfd) as the parent.
                 let parent_inode = if let Some(parent_path) = path.parent() {
-                    self.resolve_path(parent_path, root.clone()).await?
+                    self.resolve_path(parent_path, root.clone(), task).await?
                 } else {
                     root.clone()
                 };
@@ -362,9 +410,15 @@ impl VFS {
         }
     }
 
-    pub async fn unlink(&self, path: &Path, root: Arc<dyn Inode>, remove_dir: bool) -> Result<()> {
+    pub async fn unlink(
+        &self,
+        path: &Path,
+        root: Arc<dyn Inode>,
+        remove_dir: bool,
+        task: Arc<Task>,
+    ) -> Result<()> {
         // First, resolve the target inode so we can inspect its type.
-        let target_inode = self.resolve_path(path, root.clone()).await?;
+        let target_inode = self.resolve_path(path, root.clone(), task.clone()).await?;
 
         let attr = target_inode.getattr().await?;
 
@@ -382,7 +436,7 @@ impl VFS {
 
         // Determine the parent directory inode in which to perform the unlink.
         let parent_inode = if let Some(parent_path) = path.parent() {
-            self.resolve_path(parent_path, root.clone()).await?
+            self.resolve_path(parent_path, root.clone(), task).await?
         } else {
             root.clone()
         };

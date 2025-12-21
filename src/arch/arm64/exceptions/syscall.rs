@@ -1,3 +1,4 @@
+use crate::fs::syscalls::chdir::sys_chroot;
 use crate::fs::syscalls::trunc::sys_ftruncate;
 use crate::kernel::power::sys_reboot;
 use crate::kernel::rand::sys_getrandom;
@@ -100,6 +101,7 @@ pub async fn handle_syscall() {
         0x2e => sys_ftruncate(arg1.into(), arg2 as _).await,
         0x30 => sys_faccessat(arg1.into(), TUA::from_value(arg2 as _), arg3 as _).await,
         0x31 => sys_chdir(TUA::from_value(arg1 as _)).await,
+        0x33 => sys_chroot(TUA::from_value(arg1 as _)).await,
         0x38 => {
             sys_openat(
                 arg1.into(),

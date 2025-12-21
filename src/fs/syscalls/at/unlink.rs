@@ -3,6 +3,7 @@ use core::ffi::c_char;
 use libkernel::{error::Result, fs::path::Path, memory::address::TUA};
 
 use crate::{
+    current_task,
     fs::{VFS, syscalls::at::resolve_at_start_node},
     memory::uaccess::cstr::UserCStr,
     process::fd_table::Fd,
@@ -21,12 +22,15 @@ pub async fn sys_unlinkat(dirfd: Fd, path: TUA<c_char>, flags: u32) -> Result<us
     let mut buf = [0u8; 1024];
     let path = Path::new(UserCStr::from_ptr(path).copy_from_user(&mut buf).await?);
 
+    let task = current_task();
+
     // Determine the starting inode for path resolution.
     let start_node = resolve_at_start_node(dirfd, path).await?;
 
     let remove_dir = flags & AT_REMOVEDIR != 0;
 
-    VFS.unlink(path, start_node, remove_dir).await?;
+    VFS.unlink(path, start_node, remove_dir, task.clone())
+        .await?;
 
     Ok(0)
 }
