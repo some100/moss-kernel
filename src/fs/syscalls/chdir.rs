@@ -1,9 +1,10 @@
 use crate::{
     fs::VFS,
     memory::uaccess::{copy_to_user_slice, cstr::UserCStr},
+    process::fd_table::Fd,
     sched::current_task,
 };
-use alloc::{ffi::CString, string::ToString};
+use alloc::{borrow::ToOwned, ffi::CString, string::ToString};
 use core::{ffi::c_char, str::FromStr};
 use libkernel::{
     error::{KernelError, Result},
@@ -52,6 +53,22 @@ pub async fn sys_chroot(path: TUA<c_char>) -> Result<usize> {
     let node = VFS.resolve_path(path, current_path, task.clone()).await?;
 
     *task.root.lock_save_irq() = (node, new_path);
+
+    Ok(0)
+}
+
+pub async fn sys_fchdir(fd: Fd) -> Result<usize> {
+    let task = current_task();
+    let file = task
+        .fd_table
+        .lock_save_irq()
+        .get(fd)
+        .ok_or(KernelError::BadFd)?;
+
+    *task.cwd.lock_save_irq() = (
+        file.inode().ok_or(KernelError::BadFd)?,
+        file.path().ok_or(KernelError::BadFd)?.to_owned(),
+    );
 
     Ok(0)
 }
