@@ -6,7 +6,7 @@
 
 use super::path::Path;
 use alloc::string::String;
-use core::ops::Deref;
+use core::{borrow::Borrow, ops::Deref};
 
 /// An owned, mutable path, akin to `String`.
 ///
@@ -161,6 +161,12 @@ impl Deref for PathBuf {
 
     fn deref(&self) -> &Self::Target {
         Path::new(&self.inner)
+    }
+}
+
+impl Borrow<Path> for PathBuf {
+    fn borrow(&self) -> &Path {
+        self
     }
 }
 

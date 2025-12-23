@@ -3,7 +3,7 @@
 //! This module provides a `Path` struct that is a thin wrapper around `&str`,
 //! offering various methods for path inspection and manipulation.
 
-use alloc::vec::Vec;
+use alloc::{borrow::ToOwned, vec::Vec};
 
 use super::pathbuf::PathBuf;
 
@@ -214,6 +214,14 @@ impl Path {
 impl AsRef<Path> for str {
     fn as_ref(&self) -> &Path {
         Path::new(self)
+    }
+}
+
+impl ToOwned for Path {
+    type Owned = PathBuf;
+
+    fn to_owned(&self) -> Self::Owned {
+        PathBuf::from(self.as_str())
     }
 }
 

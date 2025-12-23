@@ -1,3 +1,4 @@
+use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::{collections::btree_map::BTreeMap, sync::Arc};
 use async_trait::async_trait;
@@ -337,14 +338,14 @@ impl VFS {
             FileType::File => {
                 let mut open_file =
                     OpenFile::new(Box::new(RegFile::new(target_inode.clone())), flags);
-                open_file.set_inode(target_inode);
+                open_file.update(target_inode, path.to_owned());
 
                 Ok(Arc::new(open_file))
             }
             FileType::Directory => {
                 let mut open_file =
                     OpenFile::new(Box::new(DirFile::new(target_inode.clone())), flags);
-                open_file.set_inode(target_inode);
+                open_file.update(target_inode, path.to_owned());
 
                 Ok(Arc::new(open_file))
             }

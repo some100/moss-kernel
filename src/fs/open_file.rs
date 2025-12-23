@@ -7,7 +7,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::{future, pin::Pin, task::Poll};
 use libkernel::{
     error::Result,
-    fs::{Inode, OpenFlags},
+    fs::{Inode, OpenFlags, path::Path, pathbuf::PathBuf},
 };
 
 pub struct FileCtx {
@@ -23,6 +23,7 @@ impl FileCtx {
 
 pub struct OpenFile {
     inode: Option<Arc<dyn Inode>>,
+    path: Option<PathBuf>,
     state: Mutex<(Box<dyn FileOps>, FileCtx)>,
 }
 
@@ -31,15 +32,21 @@ impl OpenFile {
         Self {
             state: Mutex::new((ops, FileCtx::new(flags))),
             inode: None,
+            path: None,
         }
     }
 
-    pub fn set_inode(&mut self, inode: Arc<dyn Inode>) {
-        self.inode = Some(inode)
+    pub fn update(&mut self, inode: Arc<dyn Inode>, path: PathBuf) {
+        self.inode = Some(inode);
+        self.path = Some(path);
     }
 
     pub fn inode(&self) -> Option<Arc<dyn Inode>> {
         self.inode.clone()
+    }
+
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
     }
 
     pub async fn flags(&self) -> OpenFlags {

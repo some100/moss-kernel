@@ -47,11 +47,51 @@ fn test_readdir() {
 
 fn test_chdir() {
     print!("Testing chdir syscall ...");
-    let path = std::ffi::CString::new("/").unwrap();
+    let path = std::ffi::CString::new("/dev").unwrap();
+    let mut buffer = [1u8; 16];
     unsafe {
         if libc::chdir(path.as_ptr()) != 0 {
             panic!("chdir failed");
         }
+        if libc::getcwd(
+            buffer.as_mut_ptr() as *mut libc::c_char,
+            buffer.len() as libc::size_t,
+        )
+        .is_null()
+        {
+            panic!("getcwd failed");
+        }
+        if std::ffi::CStr::from_ptr(buffer.as_ptr()).to_string_lossy() != "/dev" {
+            panic!("chdir failed");
+        }
+    }
+    println!(" OK");
+}
+
+fn test_fchdir() {
+    print!("Testing fchdir syscall ...");
+    let path = std::ffi::CString::new("/dev").unwrap();
+    let mut buffer = [1u8; 16];
+    unsafe {
+        let fd = libc::open(path.as_ptr(), libc::O_RDONLY);
+        if fd == -1 {
+            panic!("open failed");
+        }
+        if libc::fchdir(fd) != 0 {
+            panic!("fchdir failed");
+        }
+        if libc::getcwd(
+            buffer.as_mut_ptr() as *mut libc::c_char,
+            buffer.len() as libc::size_t,
+        )
+        .is_null()
+        {
+            panic!("getcwd failed");
+        }
+        if std::ffi::CStr::from_ptr(buffer.as_ptr()).to_string_lossy() != "/dev" {
+            panic!("fchdir failed");
+        }
+        libc::close(fd);
     }
     println!(" OK");
 }
@@ -240,6 +280,7 @@ fn main() {
     run_test(test_opendir);
     run_test(test_readdir);
     run_test(test_chdir);
+    run_test(test_fchdir);
     run_test(test_chroot);
     run_test(test_fork);
     run_test(test_read);
