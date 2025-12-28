@@ -1,4 +1,4 @@
-use crate::drivers::timer::{Instant, now, schedule_preempt};
+use crate::drivers::timer::{Instant, now, schedule_preempt, schedule_force_preempt};
 use crate::interrupts::cpu_messenger::{Message, message_cpu};
 use crate::{
     arch::{Arch, ArchImpl},
@@ -285,6 +285,10 @@ impl SchedState {
         {
             // Ensure the task state is running.
             *next_task.state.lock_save_irq() = TaskState::Running;
+            // TODO: Fix hack
+            if next_task.is_idle_task() {
+                schedule_force_preempt();
+            }
             return Ok(());
         }
 
@@ -326,12 +330,12 @@ impl SchedState {
                 *deadline_guard = Some(now_inst + Duration::from_millis(DEFAULT_TIME_SLICE_MS));
             }
             if let Some(d) = *deadline_guard {
-                log::debug!(
-                    "CPU {}: Next task {} has deadline in {}ms",
-                    CpuId::this().value(),
-                    next_task.tid.value(),
-                    (d - now_inst).as_millis()
-                );
+                // log::debug!(
+                //     "CPU {}: Next task {} has deadline in {}ms",
+                //     CpuId::this().value(),
+                //     next_task.tid.value(),
+                //     (d - now_inst).as_millis()
+                // );
                 schedule_preempt(d);
             }
         }
