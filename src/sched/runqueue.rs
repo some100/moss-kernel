@@ -41,24 +41,11 @@ impl RunQueue {
         }
     }
 
-    fn insert_task(&mut self, task: Box<SchedulableTask>) {
-        if !task.is_idle_task() {
-            self.total_weight = self.total_weight.saturating_add(task.weight() as u64);
-        }
-
-        if let Some(old_task) = self.queue.insert(task.descriptor(), task) {
-            // Handle the edge case where we overwrite a task. If we replaced
-            // someone, we must subtract their weight to avoid accounting drift.
-            warn!("Overwrote active task {:?}", old_task.descriptor());
-            self.total_weight = self.total_weight.saturating_sub(old_task.weight() as u64);
-        }
-    }
-
     pub fn switch_tasks(&mut self, next_task: TaskDescriptor, now_inst: Instant) -> SwitchResult {
-        if let Some(current) = self.current() {
-            if current.descriptor() == next_task {
-                return SwitchResult::AlreadyRunning;
-            }
+        if let Some(current) = self.current()
+            && current.descriptor() == next_task
+        {
+            return SwitchResult::AlreadyRunning;
         }
 
         let mut new_task = match self.queue.remove(&next_task) {
@@ -101,6 +88,7 @@ impl RunQueue {
         self.total_weight
     }
 
+    #[allow(clippy::borrowed_box)]
     pub fn current(&self) -> Option<&Box<SchedulableTask>> {
         self.running_task.as_ref()
     }
@@ -112,7 +100,7 @@ impl RunQueue {
     fn fallback_current_or_idle(&self) -> TaskDescriptor {
         if let Some(ref current) = self.running_task {
             let s = *current.state.lock_save_irq();
-            if !current.is_idle_task()  && (s == TaskState::Runnable || s == TaskState::Running) {
+            if !current.is_idle_task() && (s == TaskState::Runnable || s == TaskState::Running) {
                 return current.descriptor();
             }
         }
@@ -165,12 +153,17 @@ impl RunQueue {
         best_queued_desc
     }
 
-    /// Inserts `task` into this CPU's run-queue and updates all EEVDF
-    /// accounting information (eligible time, virtual deadline and the cached
-    /// weight sum).
-    pub fn enqueue_task(&mut self, mut new_task: Box<SchedulableTask>, vclock: u128) {
-        new_task.inserting_into_runqueue(vclock);
+    /// Inserts `task` into this CPU's run-queue.
+    pub fn enqueue_task(&mut self, new_task: Box<SchedulableTask>) {
+        if !new_task.is_idle_task() {
+            self.total_weight = self.total_weight.saturating_add(new_task.weight() as u64);
+        }
 
-        self.insert_task(new_task);
+        if let Some(old_task) = self.queue.insert(new_task.descriptor(), new_task) {
+            // Handle the edge case where we overwrite a task. If we replaced
+            // someone, we must subtract their weight to avoid accounting drift.
+            warn!("Overwrote active task {:?}", old_task.descriptor());
+            self.total_weight = self.total_weight.saturating_sub(old_task.weight() as u64);
+        }
     }
 }

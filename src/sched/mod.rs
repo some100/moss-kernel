@@ -73,41 +73,13 @@ fn schedule() {
         return;
     }
 
-    let mut sched = SCHED_STATE.borrow_mut();
+    SCHED_STATE.borrow_mut().do_schedule();
+}
 
-    // Update Clocks
-    let now_inst = now().expect("System timer not initialised");
-
-    sched.advance_vclock(now_inst);
-
-    if let Some(current) = sched.run_q.current_mut() {
-        current.tick(now_inst);
-    }
-
-    // Select Next Task
-    let next_task_desc = sched.run_q.find_next_runnable_desc(sched.vclock);
-
-    match sched.run_q.switch_tasks(next_task_desc, now_inst) {
-        SwitchResult::AlreadyRunning => {
-            // Nothing to do.
-            return;
-        }
-        SwitchResult::Blocked { old_task } => {
-            // If the blocked task has finished, allow it to drop here so it's
-            // resources are released.
-            if !old_task.state.lock_save_irq().is_finished() {
-                sched.wait_q.insert(old_task.descriptor(), old_task);
-            }
-        }
-        // fall-thru.
-        SwitchResult::Preempted => {}
-    }
-
-    // Update all context since the task has switched.
-    if let Some(new_current) = sched.run_q.current_mut() {
-        ArchImpl::context_switch(new_current.t_shared.clone());
-        CUR_TASK_PTR.borrow_mut().set_current(&mut new_current.task);
-    }
+/// Set the force resched task for this CPU. This ensures that the next time
+/// schedule() is called a full run of the schduling algorithm will occur.
+fn force_resched() {
+    SCHED_STATE.borrow_mut().force_resched = true;
 }
 
 pub fn spawn_kernel_work(fut: impl Future<Output = ()> + 'static + Send) {
@@ -159,6 +131,8 @@ pub struct SchedState {
     vclock: u128,
     /// Real-time moment when `vclock` was last updated.
     last_update: Option<Instant>,
+    /// Force a reschedule.
+    force_resched: bool,
 }
 
 unsafe impl Send for SchedState {}
@@ -170,6 +144,7 @@ impl SchedState {
             wait_q: BTreeMap::new(),
             vclock: 0,
             last_update: None,
+            force_resched: false,
         }
     }
 
@@ -190,12 +165,24 @@ impl SchedState {
         self.last_update = Some(now_inst);
     }
 
-    fn insert_into_runq(&mut self, task: Box<SchedulableTask>) {
+    fn insert_into_runq(&mut self, mut new_task: Box<SchedulableTask>) {
         let now = now().expect("systimer not running");
 
         self.advance_vclock(now);
 
-        self.run_q.enqueue_task(task, self.vclock);
+        new_task.inserting_into_runqueue(self.vclock);
+
+        if let Some(current) = self.run_q.current() {
+            // We force a reschedule if:
+            // 
+            // We are currently idling, OR The new task has an earlier deadline
+            // than the current task.
+            if current.is_idle_task() || new_task.v_deadline < current.v_deadline {
+                self.force_resched = true;
+            }
+        }
+
+        self.run_q.enqueue_task(new_task);
     }
 
     pub fn wakeup(&mut self, desc: TaskDescriptor) {
@@ -203,6 +190,63 @@ impl SchedState {
             self.insert_into_runq(task);
         } else {
             warn!("Spurious wakeup for task {:?}", desc);
+        }
+    }
+
+    pub fn do_schedule(&mut self) {
+        // Update Clocks
+        let now_inst = now().expect("System timer not initialised");
+
+        self.advance_vclock(now_inst);
+
+        let mut needs_resched = self.force_resched;
+
+        if let Some(current) = self.run_q.current_mut() {
+            // If the current task is IDLE, we always want to proceed to the
+            // scheduler core to see if a real task has arrived.
+            if current.is_idle_task() {
+                needs_resched = true;
+            }
+            else if current.tick(now_inst) {
+                // Otherwise, check if the real task expired
+                needs_resched = true;
+            }
+        } else {
+            needs_resched = true;
+        }
+
+        if !needs_resched {
+            // Fast Path: Only return if we have a valid task, it has budget,
+            // AND it's not the idle task.
+            return;
+        }
+
+        // Reset the force flag for next time.
+        self.force_resched = false;
+
+        // Select Next Task.
+        let next_task_desc = self.run_q.find_next_runnable_desc(self.vclock);
+
+        match self.run_q.switch_tasks(next_task_desc, now_inst) {
+            SwitchResult::AlreadyRunning => {
+                // Nothing to do.
+                return;
+            }
+            SwitchResult::Blocked { old_task } => {
+                // If the blocked task has finished, allow it to drop here so it's
+                // resources are released.
+                if !old_task.state.lock_save_irq().is_finished() {
+                    self.wait_q.insert(old_task.descriptor(), old_task);
+                }
+            }
+            // fall-thru.
+            SwitchResult::Preempted => {}
+        }
+
+        // Update all context since the task has switched.
+        if let Some(new_current) = self.run_q.current_mut() {
+            ArchImpl::context_switch(new_current.t_shared.clone());
+            CUR_TASK_PTR.borrow_mut().set_current(&mut new_current.task);
         }
     }
 }

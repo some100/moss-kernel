@@ -1,4 +1,4 @@
-use super::{current::current_task, schedule, waker::create_waker};
+use super::{current::current_task, force_resched, schedule, waker::create_waker};
 use crate::{
     arch::{Arch, ArchImpl},
     process::{
@@ -128,7 +128,8 @@ pub fn dispatch_userspace_task(ctx: *mut UserCtx) {
                                 // task.
                                 // Task is currently running or is runnable and will now sleep.
                                 TaskState::Running | TaskState::Runnable => {
-                                    *task_state = TaskState::Sleeping
+                                    force_resched();
+                                    *task_state = TaskState::Sleeping;
                                 }
                                 // If we were woken between the future returning
                                 // `Poll::Pending` and acquiring the lock above,
@@ -194,6 +195,7 @@ pub fn dispatch_userspace_task(ctx: *mut UserCtx) {
                             match *task_state {
                                 // Task is runnable or running, put it to sleep.
                                 TaskState::Running | TaskState::Runnable => {
+                                    force_resched();
                                     *task_state = TaskState::Sleeping
                                 }
                                 // If we were woken between the future returning

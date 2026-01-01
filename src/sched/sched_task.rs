@@ -52,8 +52,16 @@ impl SchedulableTask {
         })
     }
 
-    /// Update accounting info for this task given the latest time.
-    pub fn tick(&mut self, now: Instant) {
+    /// Re-issue a virtual deadline
+    pub fn replenish_deadline(&mut self) {
+        let q_ns: u128 = DEFAULT_TIME_SLICE.as_nanos();
+        let v_delta = (q_ns << VT_FIXED_SHIFT) / self.weight() as u128;
+        self.v_deadline = self.v_eligible + v_delta;
+    }
+
+    /// Update accounting info for this task given the latest time. Returns
+    /// `true` when we should try to reschedule another task, `false` otherwise.
+    pub fn tick(&mut self, now: Instant) -> bool {
         let dv_increment = if let Some(start) = self.exec_start {
             let delta = now - start;
             let w = self.weight() as u128;
@@ -68,13 +76,18 @@ impl SchedulableTask {
         // (EEVDF: v_ei += t_used / w_i).
         self.v_eligible = self.v_eligible.saturating_add(dv_increment);
 
-        // Re-issue a virtual deadline
-        let q_ns: u128 = DEFAULT_TIME_SLICE.as_nanos();
-        let v_delta = (q_ns << VT_FIXED_SHIFT) / self.weight() as u128;
-        let v_ei = self.v_eligible;
-        self.v_deadline = v_ei + v_delta;
-
         self.exec_start = Some(now);
+
+        // Has the task exceeded its deadline?
+        if self.v_eligible >= self.v_deadline {
+            self.replenish_deadline();
+
+            true
+        } else {
+            // Task still has budget. Do nothing. Return to userspace
+            // immediately.
+            false
+        }
     }
 
     /// Compute this task's scheduling weight.
@@ -119,8 +132,7 @@ impl SchedulableTask {
         // Grant it an initial virtual deadline proportional to its weight.
         let q_ns: u128 = DEFAULT_TIME_SLICE.as_nanos();
         let v_delta = (q_ns << VT_FIXED_SHIFT) / self.weight() as u128;
-        let new_v_deadline = vclock + v_delta;
-        self.v_deadline = new_v_deadline;
+        self.v_deadline = vclock + v_delta;
 
         // Since the task is not executing yet, its exec_start must be `None`.
         self.exec_start = None;
