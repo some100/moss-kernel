@@ -1,3 +1,4 @@
+use super::vdso::VDSO_BASE;
 use crate::{
     arch::arm64::exceptions::ExceptionState,
     memory::uaccess::{UserCopyable, copy_from_user, copy_to_user},
@@ -36,9 +37,12 @@ pub async fn do_signal(id: SigId, sa: UserspaceSigAction) -> Result<ExceptionSta
         alt_stack_prev_addr: UA::null(),
     };
 
-    if !sa.flags.contains(SigActionFlags::SA_RESTORER) {
-        panic!("Cannot call non-sa_restorer sig handler");
-    }
+    // Use the provided restorer trampoline, or the one provided by the VDSO if
+    // not.
+    let restorer = sa
+        .restorer
+        .map(|x| x.value())
+        .unwrap_or_else(|| VDSO_BASE.value());
 
     let addr: TUA<RtSigFrame> = if sa.flags.contains(SigActionFlags::SA_ONSTACK)
         && let Some(alt_stack) = signal.alt_stack.as_mut()
@@ -56,7 +60,7 @@ pub async fn do_signal(id: SigId, sa: UserspaceSigAction) -> Result<ExceptionSta
 
     new_state.sp_el0 = addr.value() as _;
     new_state.elr_el1 = sa.action.value() as _;
-    new_state.x[30] = sa.restorer.unwrap().value() as _;
+    new_state.x[30] = restorer as _;
     new_state.x[0] = id.user_id();
 
     Ok(new_state)
