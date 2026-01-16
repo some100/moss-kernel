@@ -72,3 +72,43 @@ pub fn test_interruptible_nanosleep() {
     }
     println!(" OK");
 }
+
+pub fn test_interruptible_read_pipe() {
+    print!("Testing interruptible read (pipe) ...");
+
+    register_handler(libc::SIGALRM, false);
+
+    unsafe {
+        let mut fds: [libc::c_int; 2] = [0; 2];
+        if libc::pipe(fds.as_mut_ptr()) != 0 {
+            panic!("pipe failed");
+        }
+
+        let pid = libc::getpid();
+
+        if libc::fork() == 0 {
+            // in child.
+            let req = libc::timespec {
+                tv_sec: 1,
+                tv_nsec: 0,
+            };
+
+            libc::nanosleep(&req, ptr::null_mut());
+            libc::kill(pid, libc::SIGALRM);
+            libc::exit(0);
+        };
+
+        let mut buf = [0u8; 10];
+        // Try to read from empty pipe (blocking)
+        let ret = libc::read(fds[0], buf.as_mut_ptr() as *mut libc::c_void, 10);
+        let err = std::io::Error::last_os_error();
+
+        libc::close(fds[0]);
+        libc::close(fds[1]);
+
+        assert_eq!(ret, -1);
+        assert_eq!(err.raw_os_error(), Some(libc::EINTR));
+        assert!(SIGNAL_CAUGHT.load(Ordering::SeqCst));
+    }
+    println!(" OK");
+}

@@ -7,7 +7,7 @@ use std::{
 };
 
 use futex_bitset::test_futex_bitset;
-use signals::test_interruptible_nanosleep;
+use signals::{test_interruptible_nanosleep, test_interruptible_read_pipe};
 
 mod futex_bitset;
 mod signals;
@@ -823,6 +823,7 @@ fn main() {
     run_test(test_parking_lot_mutex_timeout);
     run_test(test_thread_with_name);
     run_test(test_interruptible_nanosleep);
+    run_test(test_interruptible_read_pipe);
     let end = std::time::Instant::now();
     println!("All tests passed in {} ms", (end - start).as_millis());
 }
